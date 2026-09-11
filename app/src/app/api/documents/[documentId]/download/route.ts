@@ -33,9 +33,6 @@ export async function GET(
       },
     });
   } catch {
-    return NextResponse.json(
-      { error: "Document file is not available (it may have been generated on a different server instance — see README's note on local-disk storage)" },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: "Document file is not available" }, { status: 404 });
   }
 }

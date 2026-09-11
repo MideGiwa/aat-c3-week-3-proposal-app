@@ -56,7 +56,6 @@ If you hit either error, run `npm run db:push:force` instead (`drizzle-kit push 
 
 ## Known gaps (tracked, not accidental)
 
-- **Document storage is local disk** (`src/lib/storage.ts`) — fine for `next dev` or a single persistent server, but an ephemeral/serverless deploy (most Vercel setups) will lose generated PDFs between invocations. Swap that one file for S3/R2/Supabase Storage before deploying anywhere but a long-running server; nothing else needs to change, since callers only see `storagePath` as an opaque string.
 - **Attachment text extraction** only covers plain-text formats today; PDF/DOCX extraction is a scoped follow-up.
 - **The document download link has no expiry or access control** beyond an unguessable id — reasonable for this stage, not for a production proposal tool handling sensitive pricing.
 - **Auth is a placeholder.** Fine for an internal course project; not fine beyond that.
