@@ -16,6 +16,11 @@ export async function NavBar() {
         </Link>
         {user ? (
           <div className="flex min-w-0 items-center gap-3 text-sm">
+            {user.role === "approver" && (
+              <Link href="/team" className="shrink-0 text-zinc-500 transition-colors hover:text-zinc-900">
+                Team
+              </Link>
+            )}
             <span className="min-w-0 truncate text-zinc-500">
               {user.name}
               <span className="hidden text-zinc-400 sm:inline"> · {user.role}</span>

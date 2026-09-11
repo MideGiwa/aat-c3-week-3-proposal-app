@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { proposals, approvals, events } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { notifyDiscord } from "@/lib/discord";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +55,15 @@ export async function POST(
     proposalId: id,
     eventType: decision,
     detail: body?.comment ? `${user.name}: ${body.comment}` : `Decided by ${user.name}`,
+  });
+
+  await notifyDiscord({
+    kind: decision,
+    proposalId: id,
+    clientName: proposal.clientName,
+    companyName: proposal.companyName,
+    actorName: user.name,
+    detail: body?.comment || null,
   });
 
   return NextResponse.json({ ok: true });

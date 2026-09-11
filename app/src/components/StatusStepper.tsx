@@ -39,9 +39,14 @@ export function StatusStepper({ status }: { status: string }) {
   return (
     <ol className="flex items-center">
       {STEPS.map((label, i) => {
-        const isDone = i < currentIndex;
-        const isCurrent = i === currentIndex;
         const isLast = i === STEPS.length - 1;
+        // The last step has no "next" step to distinguish it from, so once
+        // it's reached in a non-error/warn state, there's nothing further
+        // to be "in progress" toward — render it as done (filled check)
+        // rather than the outlined "current" style used for steps that are
+        // still underway, or it reads as though sending never happened.
+        const isDone = i < currentIndex || (isLast && i === currentIndex && tone === "current");
+        const isCurrent = i === currentIndex && !isDone;
 
         let circleClasses = "border-zinc-200 bg-white text-zinc-400";
         if (isDone) {

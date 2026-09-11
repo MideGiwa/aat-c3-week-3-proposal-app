@@ -1,0 +1,117 @@
+{
+  "name": "Team Invite Email",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Setup\n1. Import this workflow, then open **Send Team Invite Email** and attach a Gmail OAuth2 credential (the same one used by the Proposal Email Delivery workflow works fine here too — it's just a second workflow using it, not a separate account).\n2. Open **Team Invite Webhook** → Authentication is set to *Header Auth*. Create a new **Header Auth** credential: Name = `x-webhook-secret`, Value = any random string (can reuse the same secret as the proposal-email workflow, or use a different one — either works).\n3. In the app's `.env`, set:\n   - `EMAIL_PROVIDER=n8n`\n   - `N8N_INVITE_WEBHOOK_URL=<this workflow's Production Webhook URL>`\n   - `N8N_WEBHOOK_SECRET=<the value you put in the Header Auth credential>` (shared with the proposal-email workflow's env var of the same name)\n4. Activate the workflow.\n\nThis is a **separate workflow** from Proposal Email Delivery (not a shared one with a branch) so an approver's team-management activity — inviting people, resending invites — can be inspected, rate-limited, or changed independently of client-facing proposal delivery. The app already keeps them on separate URLs: `sendProposalEmail` posts to `N8N_WEBHOOK_URL`, `sendInviteEmail` posts to `N8N_INVITE_WEBHOOK_URL` (src/lib/email.ts). If `N8N_INVITE_WEBHOOK_URL` isn't set, the app falls back to `N8N_WEBHOOK_URL` — so wiring only the proposal-email workflow still works, invites just also flow through it, exactly the shape it already accepts.\n\n## Why this exists as its own workflow\nAn invite email has no client, no attached document, and no CC list — it's one recipient, one link. Reusing the proposal workflow's node (which reads `body.clientName`/`body.proposalLink`/etc.) would work by accident since those fields are just left undefined, but a workflow that only reads the fields it actually needs is much easier to trust when someone opens it later wondering \"what does this actually send.\"\n\n## Payload this workflow expects\n```json\n{\n  \"to\": \"newperson@example.com\",\n  \"subject\": \"You're invited to Koya Talent Proposals\",\n  \"html\": \"<p>...</p>\",\n  \"text\": \"...\"\n}\n```\nSee `src/lib/email.ts` (`sendInviteEmail` / `sendViaN8nGeneric`) and `src/app/api/users/invite/route.ts` / `src/app/api/users/[id]/resend-invite/route.ts` — those two routes are the only callers.\n\n## Response contract\n- `200 { ok: true, provider: \"n8n\", messageId }`\n- `403` — wrong/missing secret (handled by the Webhook node itself)\n- `502 { ok: false, error: \"<Gmail API error detail>\" }`\n\nEither response's detail ends up in the app: on `/api/users/invite` as the `emailError` field returned alongside the still-created account, and on resend as the `emailError` field too — never a silent failure, since a teammate who never got their invite is otherwise invisible until they ask why they can't sign in.",
+        "height": 620,
+        "width": 460
+      },
+      "id": "sticky-setup-notes",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-340, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "team-invite-email",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-team-invite-email",
+      "name": "Team Invite Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 180],
+      "webhookId": "team-invite-email-webhook",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "Proposal webhook secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.body.to }}",
+        "subject": "={{ $json.body.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.body.html }}",
+        "options": {}
+      },
+      "id": "send-team-invite-email",
+      "name": "Send Team Invite Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [680, 100],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_OAUTH2_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, provider: \"n8n\", messageId: $json.messageId || $json.id || null } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [940, 20]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, error: ($json.error && $json.error.message) || $json.message || \"Failed to send email\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "respond-send-error",
+      "name": "Respond Send Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [940, 200]
+    }
+  ],
+  "connections": {
+    "Team Invite Webhook": {
+      "main": [
+        [
+          { "node": "Send Team Invite Email", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Send Team Invite Email": {
+      "main": [
+        [
+          { "node": "Respond Success", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Respond Send Error", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

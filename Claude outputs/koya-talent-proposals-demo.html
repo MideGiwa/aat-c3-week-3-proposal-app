@@ -82,7 +82,7 @@
   }
   .progress-fill{
     height:100%;
-    width:calc(100% / 6);
+    width:calc(100% / 7);
     background:var(--accent);
     transition:transform .5s cubic-bezier(.6,0,.2,1);
     transform-origin:left;
@@ -330,6 +330,52 @@
     .clickzone{ width:30%; }
     .step{ min-width:112px; padding:12px 14px; }
   }
+
+  .diagram-slide h1.display{
+    font-size:clamp(24px,3.4vw,40px);
+    margin-bottom:10px;
+    max-width:28ch;
+  }
+  .diagram-slide .lede{ margin-bottom:2px; }
+  .diagram-figure{
+    margin:clamp(16px,2.6vw,26px) 0 0;
+    max-width:980px;
+  }
+  .diagram-figure svg{
+    width:100%;
+    height:auto;
+    color:var(--ink);
+    display:block;
+  }
+  .diagram-figure text{ font-family:var(--font-body); fill:currentColor; }
+  .diagram-figure .mono{ font-family:var(--font-mono); }
+  .diagram-figure .box-title{ font-weight:600; font-size:13px; }
+  .diagram-figure .box-sub{ font-size:10.5px; opacity:.62; }
+  .diagram-figure .edge-label{
+    font-family:var(--font-mono);
+    font-size:9.5px;
+    letter-spacing:.03em;
+    text-transform:uppercase;
+    opacity:.65;
+  }
+  .diagram-figure .box{ fill:var(--surface); stroke:currentColor; stroke-width:1.4; opacity:.92; }
+  .diagram-figure .box-hub{ fill:var(--accent-soft); stroke:var(--accent); stroke-width:1.8; }
+  .diagram-figure .box-auth{ fill:var(--surface); stroke:var(--accent); stroke-width:1.4; stroke-dasharray:4 4; }
+  .diagram-figure .box-external{ fill:var(--surface-2); stroke:currentColor; stroke-width:1.2; stroke-dasharray:4 4; opacity:.85; }
+  .diagram-figure .edge{ stroke:currentColor; stroke-width:1.3; fill:none; opacity:.55; }
+  .diagram-figure .edge-dashed{ stroke:currentColor; stroke-width:1.2; fill:none; opacity:.5; stroke-dasharray:4 4; }
+  .diagram-figure figcaption{
+    margin-top:14px;
+    font-size:12.5px;
+    line-height:1.5;
+    color:var(--ink-muted);
+    max-width:70ch;
+  }
+  @media (max-width:640px){
+    .diagram-figure .box-title{ font-size:11.5px; }
+    .diagram-figure .box-sub{ font-size:9.5px; }
+    .diagram-figure .edge-label{ font-size:8.5px; }
+  }
 </style>
 </head>
 <body>
@@ -388,7 +434,94 @@
     </div>
   </section>
 
-  <section class="slide" data-index="4">
+  <section class="slide diagram-slide" data-index="4">
+    <p class="eyebrow">Under the hood</p>
+    <h1 class="display">One backend, three jobs, one source of truth.</h1>
+    <figure class="diagram-figure">
+      <svg viewBox="0 0 1090 460" role="img" aria-label="System diagram: the client web app sends authenticated requests to a backend API, which calls the AI Generation Service backed by Claude, the Document Generation service backed by object storage, and the Delivery and Logging service backed by an email provider — all reading and writing one shared data store. Sign-in is email plus an authenticator-app code, and new teammates are enrolled through an invite link an approver sends.">
+        <defs>
+          <marker id="diagArrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+          </marker>
+        </defs>
+
+        <!-- connectors (drawn first, under the boxes) -->
+        <line class="edge" x1="230" y1="75" x2="443" y2="75" marker-end="url(#diagArrow)"></line>
+        <text class="edge-label" x="336" y="63" text-anchor="middle">HTTPS requests</text>
+
+        <line class="edge" x1="657" y1="75" x2="858" y2="75" marker-start="url(#diagArrow)" marker-end="url(#diagArrow)"></line>
+        <text class="edge-label" x="757" y="63" text-anchor="middle">reads / writes</text>
+
+        <line class="edge-dashed" x1="130" y1="110" x2="130" y2="127"></line>
+
+        <line class="edge" x1="550" y1="110" x2="220" y2="248" marker-end="url(#diagArrow)"></line>
+        <text class="edge-label" x="345" y="167" text-anchor="middle">drafts via</text>
+
+        <line class="edge" x1="550" y1="110" x2="550" y2="248" marker-end="url(#diagArrow)"></line>
+        <text class="edge-label" x="561" y="182" text-anchor="start">renders via</text>
+
+        <line class="edge" x1="550" y1="110" x2="885" y2="248" marker-end="url(#diagArrow)"></line>
+        <text class="edge-label" x="748" y="167" text-anchor="middle">sends &amp; logs via</text>
+
+        <line class="edge-dashed" x1="210" y1="315" x2="210" y2="370" marker-end="url(#diagArrow)"></line>
+        <text class="edge-label" x="221" y="346" text-anchor="start">generates content</text>
+
+        <line class="edge-dashed" x1="550" y1="315" x2="550" y2="370" marker-end="url(#diagArrow)"></line>
+        <text class="edge-label" x="561" y="346" text-anchor="start">stores PDF</text>
+
+        <line class="edge-dashed" x1="900" y1="315" x2="900" y2="370" marker-end="url(#diagArrow)"></line>
+        <text class="edge-label" x="911" y="346" text-anchor="start">delivers email</text>
+
+        <!-- top row -->
+        <rect class="box" x="30" y="40" width="200" height="70" rx="10"></rect>
+        <text class="box-title" x="130" y="70" text-anchor="middle">Client Web App</text>
+        <text class="box-sub" x="130" y="87" text-anchor="middle">Salesperson &amp; approver UI</text>
+
+        <rect class="box box-hub" x="445" y="40" width="210" height="70" rx="10"></rect>
+        <text class="box-title" x="550" y="70" text-anchor="middle">Backend API</text>
+        <text class="box-sub" x="550" y="87" text-anchor="middle">Next.js route handlers</text>
+
+        <rect class="box" x="860" y="40" width="200" height="70" rx="10"></rect>
+        <text class="box-title" x="960" y="70" text-anchor="middle">Data Store</text>
+        <text class="box-sub" x="960" y="87" text-anchor="middle">Postgres (prod) / SQLite (dev)</text>
+
+        <!-- auth annotation -->
+        <rect class="box-auth" x="30" y="128" width="200" height="60" rx="10"></rect>
+        <text class="box-title mono" x="130" y="148" text-anchor="middle" style="font-size:10px; letter-spacing:.06em;">AUTH</text>
+        <text class="box-sub" x="130" y="164" text-anchor="middle">Email + authenticator app</text>
+        <text class="box-sub" x="130" y="178" text-anchor="middle">Invited by an approver</text>
+
+        <!-- service row -->
+        <rect class="box" x="100" y="250" width="220" height="65" rx="10"></rect>
+        <text class="box-title" x="210" y="278" text-anchor="middle">AI Generation Service</text>
+        <text class="box-sub" x="210" y="296" text-anchor="middle">drafts proposal content</text>
+
+        <rect class="box" x="440" y="250" width="220" height="65" rx="10"></rect>
+        <text class="box-title" x="550" y="278" text-anchor="middle">Document Generation</text>
+        <text class="box-sub" x="550" y="296" text-anchor="middle">renders the final PDF</text>
+
+        <rect class="box" x="780" y="250" width="240" height="65" rx="10"></rect>
+        <text class="box-title" x="900" y="278" text-anchor="middle">Delivery &amp; Logging</text>
+        <text class="box-sub" x="900" y="296" text-anchor="middle">sends email, writes the audit log</text>
+
+        <!-- external row -->
+        <rect class="box-external" x="100" y="372" width="220" height="58" rx="10"></rect>
+        <text class="box-title" x="210" y="399" text-anchor="middle">Claude API</text>
+        <text class="box-sub" x="210" y="415" text-anchor="middle">drafts the section text</text>
+
+        <rect class="box-external" x="440" y="372" width="220" height="58" rx="10"></rect>
+        <text class="box-title" x="550" y="399" text-anchor="middle">Object Storage</text>
+        <text class="box-sub" x="550" y="415" text-anchor="middle">stores the generated PDF</text>
+
+        <rect class="box-external" x="780" y="372" width="240" height="58" rx="10"></rect>
+        <text class="box-title" x="900" y="399" text-anchor="middle">Email Provider</text>
+        <text class="box-sub" x="900" y="415" text-anchor="middle">Resend or n8n + Gmail</text>
+      </svg>
+      <figcaption>The backend is the single control point — it calls Claude to draft, renders the PDF, and sends email, with every step logged to the same data store. Sign-in is email plus an authenticator-app code; new teammates are enrolled through an invite link an approver sends.</figcaption>
+    </figure>
+  </section>
+
+  <section class="slide" data-index="5">
     <p class="eyebrow">Why teams trust it</p>
     <h1 class="display">Nothing reaches a client by accident.</h1>
     <div class="stack">
@@ -398,7 +531,7 @@
     </div>
   </section>
 
-  <section class="slide closer" data-index="5">
+  <section class="slide closer" data-index="6">
     <p class="eyebrow">Now, live</p>
     <h1 class="display">Let's see a proposal go from a call to a client's inbox.</h1>
     <p class="lede">Real intake, a real draft, a real approval — end to end.</p>
@@ -411,7 +544,7 @@
 <button class="clickzone right" id="zoneRight" aria-label="Next slide"></button>
 
 <div class="chrome">
-  <span class="counter" id="counter">01 / 06</span>
+  <span class="counter" id="counter">01 / 07</span>
   <div class="dots" id="dots"></div>
   <div class="navbtns">
     <button class="navbtn" id="prevBtn" aria-label="Previous slide">‹</button>

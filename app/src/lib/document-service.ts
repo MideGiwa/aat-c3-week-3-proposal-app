@@ -16,7 +16,7 @@ export async function generateProposalDocument(
 ): Promise<{ id: string; storagePath: string }> {
   const proposal = await db.query.proposals.findFirst({
     where: eq(proposals.id, proposalId),
-    with: { salesperson: true, sections: true },
+    with: { currentOwner: true, sections: true },
   });
   if (!proposal) throw new DocumentGenerationError("Proposal not found");
 
@@ -35,7 +35,11 @@ export async function generateProposalDocument(
   const pdfBuffer = await renderProposalPdf({
     clientName: proposal.clientName,
     companyName: proposal.companyName,
-    salespersonName: proposal.salesperson.name,
+    // The document credits whoever is currently responsible for the
+    // proposal, not necessarily whoever originally created it — a proposal
+    // picked up by another salesperson should show *their* name to the
+    // client, not the original creator's.
+    salespersonName: proposal.currentOwner.name,
     dateOfCall: proposal.dateOfCall,
     sections: sorted.map((s) => ({
       title: SECTION_DEFS.find((d) => d.key === s.sectionKey)!.title,

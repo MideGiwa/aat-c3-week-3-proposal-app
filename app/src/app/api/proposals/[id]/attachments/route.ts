@@ -3,18 +3,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { proposals, attachments, events } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { extractAttachmentText } from "@/lib/attachment-extraction";
+import { trackOwnershipPickup } from "@/lib/ownership";
 
 export const dynamic = "force-dynamic";
-
-// Text-based formats we can extract inline today. Anything else (PDF,
-// DOCX) is stored with a filename but no extracted text yet — a clearly
-// scoped follow-up (a PDF/DOCX text extraction step) rather than a silent
-// gap, since generation only uses what's in `extractedText`.
-const TEXT_EXTENSIONS = [".txt", ".md", ".csv"];
-
-function canExtractText(filename: string): boolean {
-  return TEXT_EXTENSIONS.some((ext) => filename.toLowerCase().endsWith(ext));
-}
 
 // POST /api/proposals/:id/attachments — upload supporting material
 // (PRD scenario 3). multipart/form-data with one or more `files` entries.
@@ -37,9 +29,7 @@ export async function POST(
 
   const created = [];
   for (const file of files) {
-    const extractedText = canExtractText(file.name)
-      ? await file.text()
-      : null;
+    const extractedText = await extractAttachmentText(file);
 
     const [row] = await db
       .insert(attachments)
@@ -57,6 +47,12 @@ export async function POST(
     proposalId: id,
     eventType: "attachment_added",
     detail: `${user.name} uploaded: ${files.map((f) => f.name).join(", ")}`,
+  });
+
+  await trackOwnershipPickup({
+    proposal,
+    actingUser: user,
+    actionLabel: `uploaded ${files.length === 1 ? "a file" : `${files.length} files`}`,
   });
 
   return NextResponse.json({ attachments: created }, { status: 201 });

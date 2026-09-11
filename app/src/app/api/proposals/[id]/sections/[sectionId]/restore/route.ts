@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { proposals, sections, sectionVersions, events } from "@/lib/db/schema";
 import { isEditableStatus } from "@/lib/proposal-fields";
 import { getCurrentUser } from "@/lib/auth";
+import { trackOwnershipPickup } from "@/lib/ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +74,12 @@ export async function POST(
     proposalId: id,
     eventType: "section_edited",
     detail: `${section.sectionKey} restored to an earlier ${version.generatedBy === "ai" ? "AI-generated" : "human-edited"} version by ${user.name}`,
+  });
+
+  await trackOwnershipPickup({
+    proposal,
+    actingUser: user,
+    actionLabel: `restored ${section.sectionKey}`,
   });
 
   return NextResponse.json({ ok: true, content: version.content, needsInput: version.needsInput });
