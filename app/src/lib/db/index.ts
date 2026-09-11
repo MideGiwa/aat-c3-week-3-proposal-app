@@ -1,39 +1,55 @@
-// --- TEMPORARY SQLITE SWAP -------------------------------------------------
-// This file normally connects to Postgres via `pg` + drizzle-orm/node-postgres.
-// It has been temporarily replaced with a local SQLite (libsql) connection so
-// the app can run while Neon is unreachable over this network. The original
-// version is preserved untouched at `index.postgres.bak.ts` in this same
-// folder. See `TEMP-SQLITE-SETUP.md` at the repo root for setup + revert steps.
-//
-// `DATABASE_URL` should be a libsql file URL for this to work, e.g.:
-//   DATABASE_URL=file:./local-dev.sqlite
-// -----------------------------------------------------------------------------
-
-import { drizzle } from "drizzle-orm/libsql";
+// Opens the right database client for whatever DATABASE_URL actually is —
+// a local SQLite/libsql file for dev, or a real Postgres connection (Neon
+// in production) — instead of requiring the two to be swapped by hand in
+// separate files. See `schema.ts` in this folder for the matching
+// table/relation dispatch, `dialect.ts` for the shared URL check, and
+// DATABASE.md at the repo root for the full picture and history (this
+// replaces an earlier manual swap that briefly went to production still
+// pointed at the SQLite driver against a Postgres URL and failed the
+// Vercel build with `LibsqlError: URL_INVALID`).
+import { drizzle as drizzleLibsql } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
-import * as schema from "./schema";
+import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import * as sqliteSchema from "./schema.sqlite";
+import * as postgresSchema from "./schema.postgres";
+import { isPostgresUrl } from "./dialect";
 
-// A single client, reused across hot reloads in dev so we don't reopen the
-// file on every request. `DATABASE_URL` is required — see .env.example.
-declare global {
-  var __libsqlClient: ReturnType<typeof createClient> | undefined;
+// Deliberately does not throw when unset: this module is imported by every
+// route (via auth -> db), including ones collected at build time before any
+// request exists, so failing fast has to happen at query time instead — the
+// client only actually opens a connection on first use.
+if (!process.env.DATABASE_URL) {
+  console.warn(
+    "[db] DATABASE_URL is not set. Copy .env.example to .env.local and point it at your database — queries will fail until then."
+  );
 }
+const databaseUrl = process.env.DATABASE_URL || "file:./local-dev.sqlite";
 
-function createDbClient() {
-  // Deliberately does not throw here: this module is imported by every
-  // route (via auth -> db), including ones collected at build time before
-  // any request exists, so failing fast has to happen at query time
-  // instead — the client only actually opens the file on first use.
-  if (!process.env.DATABASE_URL) {
-    console.warn(
-      "[db] DATABASE_URL is not set. Copy .env.example to .env.local and point it at your database — queries will fail until then."
-    );
+function createDbAndClient() {
+  if (isPostgresUrl(databaseUrl)) {
+    const pool = new Pool({ connectionString: databaseUrl });
+    return { client: pool as unknown, db: drizzlePg(pool, { schema: postgresSchema }) };
   }
-  return createClient({ url: process.env.DATABASE_URL || "file:./local-dev.sqlite" });
+  const client = createClient({ url: databaseUrl });
+  return { client: client as unknown, db: drizzleLibsql(client, { schema: sqliteSchema }) };
 }
 
-const client = globalThis.__libsqlClient ?? createDbClient();
-if (process.env.NODE_ENV !== "production") globalThis.__libsqlClient = client;
+// A single client/pool, reused across hot reloads in dev so we don't
+// reopen the file or exhaust connections on every request.
+declare global {
+  var __dbInstance: ReturnType<typeof createDbAndClient> | undefined;
+}
 
-export const db = drizzle(client, { schema });
+const instance = globalThis.__dbInstance ?? createDbAndClient();
+if (process.env.NODE_ENV !== "production") globalThis.__dbInstance = instance;
+
+// Exported as the SQLite variant's type — the two schemas are kept
+// field-for-field identical on purpose (see DATABASE.md), so every query
+// built through `db` (via the table objects re-exported from
+// "@/lib/db/schema", which resolve the same way) type-checks the same
+// regardless of which dialect is actually live. At runtime `db` is
+// genuinely whichever backend DATABASE_URL points at — this assertion only
+// affects what TypeScript believes, not what code actually runs.
+export const db = instance.db as ReturnType<typeof drizzleLibsql<typeof sqliteSchema>>;
 export * as schema from "./schema";

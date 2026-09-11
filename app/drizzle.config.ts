@@ -1,20 +1,30 @@
-// --- TEMPORARY SQLITE SWAP -------------------------------------------------
-// This file normally targets Postgres. It has been temporarily replaced to
-// target the local SQLite file instead, so `db:push`/`db:studio` work against
-// `local-dev.sqlite` while Neon is unreachable. The original is preserved
-// untouched at `drizzle.config.postgres.bak.ts`. See `TEMP-SQLITE-SETUP.md`
-// at the repo root for setup + revert steps.
-// -----------------------------------------------------------------------------
 import "dotenv/config";
 import { defineConfig } from "drizzle-kit";
+import { isPostgresUrl } from "./src/lib/db/dialect";
 
-export default defineConfig({
-  schema: "./src/lib/db/schema.ts",
-  out: "./drizzle",
-  dialect: "sqlite",
-  dbCredentials: {
-    url: process.env.DATABASE_URL ?? "file:./local-dev.sqlite",
-  },
-  verbose: true,
-  strict: true,
-});
+// Mirrors the runtime dispatch in src/lib/db/index.ts and schema.ts: which
+// dialect drizzle-kit targets (for `db:push`/`db:generate`/`db:studio`)
+// follows DATABASE_URL the same way the app itself does, so there's one
+// switch to get right, not three. See DATABASE.md at the repo root.
+const databaseUrl = process.env.DATABASE_URL ?? "file:./local-dev.sqlite";
+const postgres = isPostgresUrl(databaseUrl);
+
+export default defineConfig(
+  postgres
+    ? {
+        schema: "./src/lib/db/schema.postgres.ts",
+        out: "./drizzle/postgres",
+        dialect: "postgresql",
+        dbCredentials: { url: databaseUrl },
+        verbose: true,
+        strict: true,
+      }
+    : {
+        schema: "./src/lib/db/schema.sqlite.ts",
+        out: "./drizzle/sqlite",
+        dialect: "sqlite",
+        dbCredentials: { url: databaseUrl },
+        verbose: true,
+        strict: true,
+      }
+);
