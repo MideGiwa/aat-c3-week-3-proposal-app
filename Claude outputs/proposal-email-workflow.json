@@ -1,0 +1,163 @@
+{
+  "name": "Proposal Email Delivery",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Setup\n1. Import this workflow, then open **Send Proposal Email** and attach your SMTP credentials (or swap the node for Gmail/SendGrid/Outlook — the rest of the workflow doesn't care which one sends the mail).\n2. In n8n, go to **Settings → Variables** and add `PROPOSAL_WEBHOOK_SECRET` with a random value.\n3. In the app's `.env`, set:\n   - `EMAIL_PROVIDER=n8n`\n   - `N8N_WEBHOOK_URL=<this workflow's Production Webhook URL>`\n   - `N8N_WEBHOOK_SECRET=<same value as PROPOSAL_WEBHOOK_SECRET>`\n4. Activate the workflow.\n\n## Payload the app sends\n```json\n{\n  \"to\": \"client@example.com\",\n  \"clientName\": \"...\",\n  \"companyName\": \"...\",\n  \"salespersonName\": \"...\",\n  \"proposalLink\": \"https://.../api/documents/<id>/download\",\n  \"subject\": \"Proposal for ...\",\n  \"html\": \"<p>...</p>\",\n  \"text\": \"...\"\n}\n```\nSee `src/lib/email.ts` (`sendViaN8n`) in the app repo — this workflow is the other end of that call.\n\n## Response contract\nThe app only checks for a 2xx status to treat the send as successful, but this workflow always replies with a JSON body describing what happened, which shows up as `lastError` on the proposal if something goes wrong:\n- `200 { ok: true, provider: \"n8n\", messageId }`\n- `401 { ok: false, error: \"Invalid or missing webhook secret\" }`\n- `502 { ok: false, error: \"<SMTP/provider error detail>\" }`",
+        "height": 460,
+        "width": 400
+      },
+      "id": "sticky-setup-notes",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-320, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "proposal-email",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-proposal-email",
+      "name": "Proposal Email Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 180],
+      "webhookId": "proposal-email-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "secret-match",
+              "leftValue": "={{ $json.headers['x-webhook-secret'] }}",
+              "rightValue": "={{ $vars.PROPOSAL_WEBHOOK_SECRET }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-webhook-secret",
+      "name": "Check Webhook Secret",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 180]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.EMAIL_FROM || 'proposals@example.com' }}",
+        "toEmail": "={{ $json.body.to }}",
+        "subject": "={{ $json.body.subject }}",
+        "emailFormat": "both",
+        "text": "={{ $json.body.text }}",
+        "html": "={{ $json.body.html }}",
+        "options": {}
+      },
+      "id": "send-proposal-email",
+      "name": "Send Proposal Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [680, 100],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_WITH_YOUR_SMTP_CREDENTIAL_ID",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, provider: \"n8n\", messageId: $json.messageId || $json.id || null } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [940, 20]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, error: ($json.error && $json.error.message) || $json.message || \"Failed to send email\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "respond-send-error",
+      "name": "Respond Send Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [940, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, error: \"Invalid or missing webhook secret\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "respond-unauthorized",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [680, 340]
+    }
+  ],
+  "connections": {
+    "Proposal Email Webhook": {
+      "main": [
+        [
+          { "node": "Check Webhook Secret", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Check Webhook Secret": {
+      "main": [
+        [
+          { "node": "Send Proposal Email", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Respond Unauthorized", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Send Proposal Email": {
+      "main": [
+        [
+          { "node": "Respond Success", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Respond Send Error", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
