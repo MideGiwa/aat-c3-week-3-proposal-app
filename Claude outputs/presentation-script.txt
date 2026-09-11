@@ -1,0 +1,118 @@
+KOYA TALENT PROPOSALS — STAKEHOLDER DEMO SCRIPT
+Total time: 5 minutes (slides ~2:45, live demo ~2:15)
+Deck: koya-talent-proposals-demo.html (arrow keys / click sides / bottom dots to navigate)
+
+------------------------------------------------------------
+SLIDE 1 — COVER                                    (0:00–0:20)
+------------------------------------------------------------
+[Just say the name and frame why anyone should care in one breath.]
+
+"This is Koya Talent Proposals — a small internal tool that takes a
+proposal from a call to something ready for a client's inbox, with a
+human decision at every step that actually matters."
+
+------------------------------------------------------------
+SLIDE 2 — THE PROBLEM                              (0:20–0:55)
+------------------------------------------------------------
+[Advance: press → or click the right side of the screen]
+
+"Right now, after a discovery call, someone on the sales team writes
+the proposal by hand — pulling from notes, an old proposal, whatever
+template is closest. That's slow, and the result depends entirely on
+who happened to write it that week — tone, completeness, all of it
+varies. And once it's out for review, there's no shared view of where
+it actually stands — you have to ask."
+
+------------------------------------------------------------
+SLIDE 3 — THE SOLUTION                             (0:55–1:30)
+------------------------------------------------------------
+[Advance]
+
+"So the fix isn't 'let AI write the proposal and send it.' It's one
+workflow: Claude drafts every section straight from the call intake,
+a salesperson reviews and edits that draft instead of starting from
+nothing, it goes through internal approval, and it's logged the whole
+way through. The salesperson stays the editor — not the author from a
+blank page."
+
+------------------------------------------------------------
+SLIDE 4 — HOW IT WORKS                             (1:30–2:10)
+------------------------------------------------------------
+[Advance — this is the six-step flow diagram]
+
+"Concretely, that's six steps: intake, AI draft, review and edit,
+approval, send, and logged. Each proposal always has exactly one of
+these as its current status, and that status is what the whole team
+sees on the dashboard — not something you have to ask about."
+
+[Optional, if you have 10 extra seconds and the room looks technical:]
+"And 'review and edit' isn't all-or-nothing — a section can be
+regenerated or hand-edited on its own without touching the rest."
+
+------------------------------------------------------------
+SLIDE 5 — WHY TEAMS TRUST IT                       (2:10–2:40)
+------------------------------------------------------------
+[Advance]
+
+"Three things make this safe to actually use. One — if the call notes
+are missing something, the draft flags it instead of guessing, and the
+proposal can't move to review until that's filled in. Two — nothing
+reaches a client without internal approval, and that's enforced on the
+server, not just a button we hide in the interface. Three — every
+step is logged, so if something fails — a send, a document, anything —
+it's visible and debuggable, never silent."
+
+------------------------------------------------------------
+SLIDE 6 — TRANSITION TO DEMO                       (2:40–2:55)
+------------------------------------------------------------
+[Advance — last slide]
+
+"Let's stop talking about it and just watch one go from a call to a
+client's inbox."
+
+[Switch over to the running app now.]
+
+------------------------------------------------------------
+LIVE DEMO                                          (2:55–5:00, ~2 min)
+------------------------------------------------------------
+Suggested path through the app — trim to whatever fits the room and
+the time you have left. Narrate what status the proposal is in at
+each stop; that status is the whole point of the pitch.
+
+  1. Dashboard — show a couple of existing proposals and their
+     statuses at a glance (draft / pending review / approved / sent).
+
+  2. Open one proposal (or start a new one from intake) — point out
+     the intake details are all there, editable, not thrown away
+     after generation.
+
+  3. Show a generated section, and if one has it, a
+     [NEEDS INPUT: ...] marker — this is the "don't guess" behavior
+     from slide 5, made concrete.
+
+  4. Regenerate or hand-edit one section — show the rest of the
+     proposal is untouched.
+
+  5. Submit for approval → show the approval screen / decision.
+     (If you have an approver login handy, make the decision live.)
+
+  6. Send (or show a proposal already marked "sent") → open the
+     generated PDF briefly.
+
+  7. Close on the dashboard again, now showing that proposal as
+     "sent" — the loop closes exactly where slide 6 said it would.
+
+CLOSING LINE (if you have 10 seconds left):
+"That's the whole loop — draft, review, approve, send, logged —
+happy to take questions or go deeper on any piece of it."
+
+------------------------------------------------------------
+NOTES
+------------------------------------------------------------
+- Deck navigation: → / ↓ / space / click-right = next slide,
+  ← / ↑ / click-left = previous. Bottom dots jump to any slide.
+- If a question derails timing, it's fine to skip slide 4's optional
+  aside or shorten the demo to steps 1, 3, 5, and 6 only.
+- Keep slide narration to what's written above — the slides are
+  deliberately sparse so the room is listening to you, not reading
+  past you.

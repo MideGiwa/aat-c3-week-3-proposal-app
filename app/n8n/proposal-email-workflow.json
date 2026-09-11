@@ -1,0 +1,117 @@
+{
+  "name": "Proposal Email Delivery",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Setup\n1. Import this workflow, then open **Send Proposal Email** and attach a Gmail OAuth2 credential (connect the Google account that should send these — Google Cloud Console → enable the Gmail API → OAuth client → n8n's Gmail credential does the rest).\n2. Open **Proposal Email Webhook** → Authentication is set to *Header Auth*. Create a new **Header Auth** credential (this is a regular credential, not an instance-level Variable — no admin/owner access needed): Name = `x-webhook-secret`, Value = any random string.\n3. In the app's `.env`, set:\n   - `EMAIL_PROVIDER=n8n`\n   - `N8N_WEBHOOK_URL=<this workflow's Production Webhook URL>`\n   - `N8N_WEBHOOK_SECRET=<the same value you put in the Header Auth credential>`\n4. Activate the workflow.\n\nn8n's Webhook node checks the header itself before the workflow even starts — a request with the wrong or missing `x-webhook-secret` gets an automatic `403` and never reaches Send Proposal Email, so there's no separate \"check secret\" node to build (Variables aren't needed anywhere in this workflow).\n\n## Why \"Send a message\", not \"Send and Wait for Response\"\nGmail's *Send and Wait* operation pauses the workflow until the **recipient** replies or clicks a button in the email — meant for human-in-the-loop approval steps, not for confirming a send. This workflow is called synchronously from the app (`src/lib/email.ts`, `sendViaN8n`) with a 10-second timeout on the fetch, so anything that waits on the client would just time out on the app's side while n8n kept waiting indefinitely. If you want an approve/reject-by-email step for the *internal* approval gate (before a proposal is sent), that's a good fit for *Send and Wait* — but as a separate workflow triggered on `submitted_for_review`, not this one.\n\n## Payload the app sends\n```json\n{\n  \"to\": \"client@example.com\",\n  \"clientName\": \"...\",\n  \"companyName\": \"...\",\n  \"salespersonName\": \"...\",\n  \"proposalLink\": \"https://.../api/documents/<id>/download\",\n  \"subject\": \"Proposal for ...\",\n  \"html\": \"<p>...</p>\",\n  \"text\": \"...\"\n}\n```\nSee `src/lib/email.ts` (`sendViaN8n`) in the app repo — this workflow is the other end of that call.\n\n## Response contract\nThe app only checks for a 2xx status to treat the send as successful, but this workflow always replies with a JSON body describing what happened, which shows up as `lastError` on the proposal if something goes wrong:\n- `200 { ok: true, provider: \"n8n\", messageId }`\n- `403` — wrong/missing secret (handled by the Webhook node itself, before this workflow's logic runs)\n- `502 { ok: false, error: \"<Gmail API error detail>\" }`",
+        "height": 560,
+        "width": 440
+      },
+      "id": "sticky-setup-notes",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-320, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "proposal-email",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-proposal-email",
+      "name": "Proposal Email Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 180],
+      "webhookId": "proposal-email-webhook",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "Proposal webhook secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.body.to }}",
+        "subject": "={{ $json.body.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.body.html }}",
+        "options": {}
+      },
+      "id": "send-proposal-email",
+      "name": "Send Proposal Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [680, 100],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_OAUTH2_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, provider: \"n8n\", messageId: $json.messageId || $json.id || null } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [940, 20]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, error: ($json.error && $json.error.message) || $json.message || \"Failed to send email\" } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "respond-send-error",
+      "name": "Respond Send Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [940, 200]
+    }
+  ],
+  "connections": {
+    "Proposal Email Webhook": {
+      "main": [
+        [
+          { "node": "Send Proposal Email", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Send Proposal Email": {
+      "main": [
+        [
+          { "node": "Respond Success", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Respond Send Error", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

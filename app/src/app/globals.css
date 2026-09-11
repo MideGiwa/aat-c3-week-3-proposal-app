@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+/* This app is light-only by design — every screen uses fixed light-mode
+   classes (bg-white, text-zinc-900, border-zinc-200, etc.) with no dark:
+   variants anywhere. There used to be a `prefers-color-scheme: dark` block
+   here plus a plain `body { background / color }` rule. That rule was NOT
+   inside a Tailwind `@layer`, and un-layered CSS always wins over layered
+   CSS (which is where Tailwind puts its utility classes) regardless of
+   selector specificity or source order — so on a system/browser set to dark
+   mode, that one rule silently overrode `layout.tsx`'s `bg-zinc-50
+   text-zinc-900` on <body>, turning the whole page background black behind
+   the still-light cards. Removed rather than "fixed", since a half dark
+   mode (correct body color, everything else still hardcoded light) would
+   look worse, not better.
+
+   font-sans / font-mono are still customized here since Tailwind's
+   `font-sans` utility (used in layout.tsx) reads from these theme tokens. */
+@theme inline {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+/* Visible keyboard-focus indicator on every interactive element. The app
+   uses native <button>/<a>/<input>/<textarea> elements rather than a
+   component library that would otherwise supply one, so without this,
+   keyboard users get no visible focus state at all. Uses the app's teal
+   accent color so focus states read as part of the same design language
+   as the primary buttons, not a generic browser default. */
+:focus-visible {
+  outline: 2px solid #0d9488;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
