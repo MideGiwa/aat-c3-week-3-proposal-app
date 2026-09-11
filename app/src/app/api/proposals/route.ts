@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const rows = await db.query.proposals.findMany({
     orderBy: [desc(proposals.createdAt)],
-    with: { salesperson: true },
+    with: { salesperson: true, currentOwner: true },
   });
   return NextResponse.json({ proposals: rows });
 }
@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
       companyName: body.company_name,
       dateOfCall: body.date_of_call || null,
       salespersonId: user.id,
+      currentOwnerId: user.id,
     })
     .returning();
 

@@ -1,1 +1,4 @@
 app/.env.local
+
+.vercel
+.env*

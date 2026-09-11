@@ -13,6 +13,12 @@ import {
 
 export const roleEnum = pgEnum("role", ["salesperson", "approver"]);
 
+// "invited": provisioned by an approver, no authenticator enrolled yet —
+// can't sign in. "active": has completed authenticator setup. Every
+// pre-existing seeded user is "active" by default, so this migration
+// doesn't lock anyone out.
+export const userStatusEnum = pgEnum("user_status", ["invited", "active"]);
+
 export const proposalStatusEnum = pgEnum("proposal_status", [
   "draft",
   "pending_review",
@@ -57,6 +63,8 @@ export const eventTypeEnum = pgEnum("event_type", [
   "document_failed",
   "sent",
   "send_failed",
+  "approval_undone",
+  "ownership_changed",
 ]);
 
 // --- Tables ------------------------------------------------------------------
@@ -70,6 +78,17 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   role: roleEnum("role").notNull().default("salesperson"),
+  status: userStatusEnum("status").notNull().default("active"),
+  // Set once, at authenticator setup, and never exposed again after that.
+  totpSecret: text("totp_secret"),
+  // Not a declared foreign key (a self-reference on this same table would
+  // need an awkward lazy-type workaround for one purely informational
+  // column) — just the inviting user's id, shown on the team page.
+  invitedBy: uuid("invited_by"),
+  // Only a hash of the invite token is stored (sha256 hex); cleared once the
+  // invite is used so a used/expired link can't be replayed.
+  inviteTokenHash: text("invite_token_hash"),
+  inviteTokenExpiresAt: timestamp("invite_token_expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -80,6 +99,9 @@ export const proposals = pgTable("proposals", {
   companyName: text("company_name").notNull(),
   dateOfCall: text("date_of_call"),
   salespersonId: uuid("salesperson_id")
+    .notNull()
+    .references(() => users.id),
+  currentOwnerId: uuid("current_owner_id")
     .notNull()
     .references(() => users.id),
   status: proposalStatusEnum("status").notNull().default("draft"),
@@ -150,6 +172,11 @@ export const approvals = pgTable("approvals", {
   decision: approvalDecisionEnum("decision").notNull(),
   comment: text("comment"),
   decidedAt: timestamp("decided_at", { withTimezone: true }).defaultNow().notNull(),
+  // Set when an approver undoes an "approved" decision before the proposal
+  // is sent. Kept rather than deleted so the approval history isn't erased;
+  // "latest approval" lookups filter these out via `undoneAt IS NULL`.
+  undoneAt: timestamp("undone_at", { withTimezone: true }),
+  undoneBy: uuid("undone_by").references(() => users.id),
 });
 
 // Append-only audit/event log. Every component writes here on success and
@@ -182,7 +209,8 @@ export const documents = pgTable("documents", {
 // --- Relations (for the drizzle query API, e.g. db.query.proposals.findMany) -
 
 export const usersRelations = relations(users, ({ many }) => ({
-  proposals: many(proposals),
+  proposalsCreated: many(proposals, { relationName: "proposalCreator" }),
+  proposalsOwned: many(proposals, { relationName: "proposalCurrentOwner" }),
   approvals: many(approvals),
 }));
 
@@ -190,6 +218,12 @@ export const proposalsRelations = relations(proposals, ({ one, many }) => ({
   salesperson: one(users, {
     fields: [proposals.salespersonId],
     references: [users.id],
+    relationName: "proposalCreator",
+  }),
+  currentOwner: one(users, {
+    fields: [proposals.currentOwnerId],
+    references: [users.id],
+    relationName: "proposalCurrentOwner",
   }),
   intakeFields: many(intakeFields),
   sections: many(sections),

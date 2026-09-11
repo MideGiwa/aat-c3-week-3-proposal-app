@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { proposals, events } from "@/lib/db/schema";
 import { generateProposalDocument, DocumentGenerationError } from "@/lib/document-service";
 import { getCurrentUser } from "@/lib/auth";
+import { notifyDiscord } from "@/lib/discord";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +74,14 @@ export async function POST(
         .update(proposals)
         .set({ status: "document_failed", lastError: reason, updatedAt: new Date() })
         .where(eq(proposals.id, id));
+
+      await notifyDiscord({
+        kind: "document_failed",
+        proposalId: id,
+        clientName: proposal.clientName,
+        companyName: proposal.companyName,
+        detail: reason,
+      });
     }
     return NextResponse.json({ error: "Document generation failed", detail: reason }, { status: 502 });
   }

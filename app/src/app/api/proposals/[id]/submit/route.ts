@@ -3,6 +3,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { proposals, sections, events } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { notifyDiscord } from "@/lib/discord";
+import { trackOwnershipPickup } from "@/lib/ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +57,20 @@ export async function POST(
     proposalId: id,
     eventType: "submitted_for_review",
     detail: `Submitted by ${user.name}`,
+  });
+
+  await trackOwnershipPickup({
+    proposal,
+    actingUser: user,
+    actionLabel: "submitted for review",
+  });
+
+  await notifyDiscord({
+    kind: "submitted_for_review",
+    proposalId: id,
+    clientName: proposal.clientName,
+    companyName: proposal.companyName,
+    actorName: user.name,
   });
 
   return NextResponse.json({ ok: true });

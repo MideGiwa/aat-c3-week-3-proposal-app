@@ -26,6 +26,12 @@ export type SendProposalEmailParams = {
   companyName: string;
   salespersonName: string;
   proposalLink: string;
+  // The salesperson who owns the proposal and whoever approved it should
+  // both stay in the loop on the actual send — they get copied on the
+  // client-facing email rather than only seeing it land via the internal
+  // event log. Caller is responsible for deduping/omitting the client's own
+  // address; this is passed straight through to the provider as-is.
+  ccEmails?: string[];
 };
 
 export type SendProposalEmailResult = {
@@ -33,9 +39,42 @@ export type SendProposalEmailResult = {
   externalId: string;
 };
 
+// The generic send underneath both `sendProposalEmail` and
+// `sendInviteEmail` (and any future transactional email) — one place that
+// knows how to actually reach Resend or n8n, so a new email type never has
+// to re-implement the provider switch or its error handling.
+export type SendEmailParams = {
+  to: string;
+  ccEmails?: string[];
+  subject: string;
+  html: string;
+  text: string;
+  // Extra fields merged into the n8n webhook payload only (Resend ignores
+  // this entirely). Lets a specific email type (proposal delivery, today)
+  // hand useful context to a downstream n8n workflow without forcing every
+  // email type to fabricate values for fields that don't apply to it.
+  n8nExtra?: Record<string, unknown>;
+  // Which env var holds the target webhook URL for this email type, so a
+  // team can point proposal delivery and team invites at two separate n8n
+  // workflows (e.g. to review/change one without touching the other).
+  // Falls back to N8N_WEBHOOK_URL if the specific one isn't set, so a team
+  // that only configured one webhook still gets a working send either way
+  // — both workflows accept the same {to, cc, subject, html, text} shape.
+  n8nWebhookUrlEnv?: "N8N_WEBHOOK_URL" | "N8N_INVITE_WEBHOOK_URL";
+};
+
+export type SendEmailResult = SendProposalEmailResult;
+
 function currentProvider(): EmailProvider {
   const raw = (process.env.EMAIL_PROVIDER || "resend").trim().toLowerCase();
   return raw === "n8n" ? "n8n" : "resend";
+}
+
+export async function sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
+  const provider = currentProvider();
+  const externalId =
+    provider === "n8n" ? await sendViaN8nGeneric(params) : await sendViaResendGeneric(params);
+  return { provider, externalId };
 }
 
 // Mirrors client-email-template.md — kept as one function so both
@@ -81,31 +120,83 @@ function buildEmailContent(params: SendProposalEmailParams) {
 export async function sendProposalEmail(
   params: SendProposalEmailParams
 ): Promise<SendProposalEmailResult> {
-  const provider = currentProvider();
   const content = buildEmailContent(params);
-
-  const externalId =
-    provider === "n8n"
-      ? await sendViaN8n(params, content)
-      : await sendViaResend(params, content);
-
-  return { provider, externalId };
+  return sendEmail({
+    to: params.clientEmail,
+    ccEmails: params.ccEmails,
+    subject: content.subject,
+    html: content.html,
+    text: content.text,
+    // Kept as extra (optional) fields for n8n specifically, in case a
+    // workflow wants to key off them — unchanged from before this was
+    // generalized, so an existing n8n setup doesn't need to change.
+    n8nExtra: {
+      clientName: params.clientName,
+      companyName: params.companyName,
+      salespersonName: params.salespersonName,
+      proposalLink: params.proposalLink,
+    },
+  });
 }
 
-async function sendViaResend(
-  params: SendProposalEmailParams,
-  content: { subject: string; text: string; html: string }
-): Promise<string> {
+// Sent when an approver adds a new teammate (architecture.md's auth
+// section, added alongside authenticator-app sign-in): the recipient has no
+// account they can use yet, just a one-time link that lets them enroll an
+// authenticator and activate it themselves.
+export type SendInviteEmailParams = {
+  toEmail: string;
+  toName: string;
+  role: "salesperson" | "approver";
+  inviterName: string;
+  setupLink: string;
+  expiresInHours: number;
+};
+
+export async function sendInviteEmail(params: SendInviteEmailParams): Promise<SendEmailResult> {
+  const subject = "You're invited to Koya Talent Proposals";
+  const roleLabel = params.role === "approver" ? "an approver" : "a salesperson";
+
+  const text = [
+    `Hi ${params.toName},`,
+    "",
+    `${params.inviterName} has added you to Koya Talent Proposals as ${roleLabel}.`,
+    "",
+    `Set up your account here: ${params.setupLink}`,
+    "",
+    "You'll need an authenticator app (Google Authenticator, Authy, 1Password, etc.) — the link walks you through scanning a QR code to finish setup. There's no password; your authenticator app's code is how you sign in from now on.",
+    "",
+    `This link expires in ${params.expiresInHours} hours. If it expires before you use it, ask ${params.inviterName} to send you a new one.`,
+    "",
+    "— Koya Talent",
+  ].join("\n");
+
+  const esc = (s: string) =>
+    s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+  const html = `
+    <p>Hi ${esc(params.toName)},</p>
+    <p>${esc(params.inviterName)} has added you to Koya Talent Proposals as ${esc(roleLabel)}.</p>
+    <p><a href="${params.setupLink}">Set up your account</a> to get started.</p>
+    <p>You'll need an authenticator app (Google Authenticator, Authy, 1Password, etc.) — the link walks you through scanning a QR code to finish setup. There's no password; your authenticator app's code is how you sign in from now on.</p>
+    <p>This link expires in ${params.expiresInHours} hours. If it expires before you use it, ask ${esc(params.inviterName)} to send you a new one.</p>
+    <p>— Koya Talent</p>
+  `.trim();
+
+  return sendEmail({ to: params.toEmail, subject, html, text, n8nWebhookUrlEnv: "N8N_INVITE_WEBHOOK_URL" });
+}
+
+async function sendViaResendGeneric(params: SendEmailParams): Promise<string> {
   if (!process.env.RESEND_API_KEY) {
     throw new EmailError("resend", "RESEND_API_KEY is not set");
   }
   const resend = new Resend(process.env.RESEND_API_KEY);
   const { data, error } = await resend.emails.send({
     from: process.env.EMAIL_FROM || "proposals@example.com",
-    to: params.clientEmail,
-    subject: content.subject,
-    html: content.html,
-    text: content.text,
+    to: params.to,
+    ...(params.ccEmails && params.ccEmails.length > 0 ? { cc: params.ccEmails } : {}),
+    subject: params.subject,
+    html: params.html,
+    text: params.text,
   });
   if (error) {
     throw new EmailError("resend", error.message || "Resend API error");
@@ -113,13 +204,11 @@ async function sendViaResend(
   return data?.id ?? "unknown";
 }
 
-async function sendViaN8n(
-  params: SendProposalEmailParams,
-  content: { subject: string; text: string; html: string }
-): Promise<string> {
-  const url = process.env.N8N_WEBHOOK_URL;
+async function sendViaN8nGeneric(params: SendEmailParams): Promise<string> {
+  const preferredEnv = params.n8nWebhookUrlEnv ?? "N8N_WEBHOOK_URL";
+  const url = process.env[preferredEnv] || process.env.N8N_WEBHOOK_URL;
   if (!url) {
-    throw new EmailError("n8n", "N8N_WEBHOOK_URL is not set");
+    throw new EmailError("n8n", `${preferredEnv} (or N8N_WEBHOOK_URL) is not set`);
   }
 
   let res: Response;
@@ -133,14 +222,12 @@ async function sendViaN8n(
           : {}),
       },
       body: JSON.stringify({
-        to: params.clientEmail,
-        clientName: params.clientName,
-        companyName: params.companyName,
-        salespersonName: params.salespersonName,
-        proposalLink: params.proposalLink,
-        subject: content.subject,
-        html: content.html,
-        text: content.text,
+        to: params.to,
+        cc: params.ccEmails ?? [],
+        subject: params.subject,
+        html: params.html,
+        text: params.text,
+        ...(params.n8nExtra ?? {}),
       }),
       signal: AbortSignal.timeout(10_000),
     });

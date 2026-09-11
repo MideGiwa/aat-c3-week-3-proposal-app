@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SECTION_DEFS, SectionKey, STATUS_LABEL, STATUS_DOT, INTAKE_FIELDS, isEditableStatus } from "@/lib/proposal-fields";
 import { StatusStepper } from "@/components/StatusStepper";
 import { MarkdownLite } from "@/components/MarkdownLite";
+import { SUPPORTED_EXTRACTION_LABEL } from "@/lib/attachment-extraction";
 
 type SectionVersionData = {
   id: string;
@@ -34,11 +36,19 @@ type ProposalData = {
   companyName: string;
   status: string;
   lastError: string | null;
-  salesperson: { id: string; name: string };
+  salesperson: { id: string; name: string; email: string };
+  currentOwner: { id: string; name: string; email: string };
   intakeFields: { fieldKey: string; fieldValue: string }[];
   sections: SectionData[];
   attachments: { id: string; filename: string; extractedText: string | null }[];
-  approvals: { id: string; decision: string; comment: string | null; reviewer: { name: string } }[];
+  approvals: {
+    id: string;
+    decision: string;
+    comment: string | null;
+    decidedAt: string;
+    undoneAt: string | null;
+    reviewer: { name: string; email: string };
+  }[];
   events: EventData[];
   documents: DocumentData[];
 };
@@ -62,6 +72,8 @@ const EVENT_META: Record<string, { label: string; dot: string }> = {
   approved: { label: "Approved", dot: "bg-green-500" },
   rejected: { label: "Rejected", dot: "bg-red-500" },
   changes_requested: { label: "Changes requested", dot: "bg-orange-500" },
+  approval_undone: { label: "Approval undone", dot: "bg-amber-500" },
+  ownership_changed: { label: "Picked up by someone else", dot: "bg-teal-500" },
   document_generated: { label: "Document generated", dot: "bg-blue-500" },
   document_failed: { label: "Document failed", dot: "bg-red-500" },
   sent: { label: "Sent to client", dot: "bg-green-500" },
@@ -94,6 +106,8 @@ export function ProposalEditor({
   const [showChangesForm, setShowChangesForm] = useState(false);
   const [changesComment, setChangesComment] = useState("");
   const [openHistory, setOpenHistory] = useState<Record<string, boolean>>({});
+  const [showSendConfirm, setShowSendConfirm] = useState(false);
+  const [hasFileSelected, setHasFileSelected] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // The call notes a proposal was created from — separate from `drafts`
@@ -108,6 +122,22 @@ export function ProposalEditor({
   );
   const intakeDirty = INTAKE_FIELDS.some((f) => (intakeDrafts[f.key] ?? "") !== (intakeValues[f.key] ?? ""));
 
+  // Mirrors the cc list the send route actually builds server-side (latest
+  // "approved" decision's reviewer, plus the salesperson, deduped against
+  // each other and against the client's own address) so the confirmation
+  // modal shows exactly who is about to be copied rather than just who the
+  // email is addressed to.
+  const latestApproval = [...proposal.approvals]
+    .filter((a) => a.decision === "approved" && !a.undoneAt)
+    .sort((a, b) => new Date(b.decidedAt).getTime() - new Date(a.decidedAt).getTime())[0];
+  const sendCcEmails = Array.from(
+    new Set(
+      [proposal.currentOwner.email, latestApproval?.reviewer.email].filter(
+        (email): email is string => !!email && email !== proposal.clientEmail
+      )
+    )
+  );
+
   // Every action either shows a red error box or, previously, nothing at
   // all on success — refreshing the page silently was easy to mistake for
   // "did that actually work?". Show a brief positive acknowledgment instead.
@@ -116,6 +146,26 @@ export function ProposalEditor({
     const t = setTimeout(() => setSuccess(null), 4000);
     return () => clearTimeout(t);
   }, [success]);
+
+  // Sending is the one action here that immediately puts a real email in a
+  // client's inbox — worth an explicit "is this who/what you meant to send"
+  // check rather than firing on the first click, the way every other action
+  // in this editor does. Escape closes it like any other dialog, but only
+  // while nothing is in flight — a request already underway shouldn't be
+  // dismissable out from under itself.
+  useEffect(() => {
+    if (!showSendConfirm) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && busy === null) setShowSendConfirm(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [showSendConfirm, busy]);
+
+  async function confirmSend() {
+    await run("send", () => call(`/api/proposals/${proposal.id}/send`, { method: "POST" }), "Sent to client.");
+    setShowSendConfirm(false);
+  }
 
   const hasAnyContent = proposal.sections.some((s) => s.currentContent.trim());
   const completeCount = proposal.sections.filter((s) => s.currentContent.trim() && !s.needsInput).length;
@@ -128,6 +178,11 @@ export function ProposalEditor({
   const canSend =
     (proposal.status === "approved" || proposal.status === "send_failed" || proposal.status === "document_failed") &&
     (isSalesperson || isApprover);
+  // Only from "approved" itself — once a send has actually been attempted
+  // (document_failed/send_failed), there's a document/event trail hanging
+  // off that approval that undoing it would leave orphaned, so this window
+  // is specifically "approved, but nobody has hit send yet".
+  const canUndoApproval = isApprover && proposal.status === "approved";
   const latestDocument = proposal.documents[0];
   const earlierDocuments = proposal.documents.slice(1);
 
@@ -158,6 +213,12 @@ export function ProposalEditor({
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-10">
+      <Link
+        href="/proposals"
+        className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 transition-colors hover:text-zinc-900"
+      >
+        ← Back to proposals
+      </Link>
       <div className="mb-6 border-b border-zinc-200 pb-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -165,7 +226,14 @@ export function ProposalEditor({
               {proposal.clientName} — {proposal.companyName}
             </h1>
             <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-500">
-              <span>Prepared by {proposal.salesperson.name}</span>
+              {proposal.currentOwner.id === proposal.salesperson.id ? (
+                <span>Prepared by {proposal.salesperson.name}</span>
+              ) : (
+                <span>
+                  Currently owned by <span className="font-medium text-zinc-700">{proposal.currentOwner.name}</span>{" "}
+                  (created by {proposal.salesperson.name})
+                </span>
+              )}
               <span className="inline-flex items-center gap-1.5 text-zinc-700">
                 <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[proposal.status] ?? "bg-zinc-400"}`} />
                 {STATUS_LABEL[proposal.status] ?? proposal.status}
@@ -175,7 +243,27 @@ export function ProposalEditor({
           {!hasAnyContent && canEdit && (
             <button
               disabled={busy !== null}
-              onClick={() => run("generate", () => call(`/api/proposals/${proposal.id}/generate`, { method: "POST" }), "Proposal generated.")}
+              onClick={() =>
+                run(
+                  "generate",
+                  async () => {
+                    // `drafts` was seeded from `proposal.sections` once, on
+                    // mount — router.refresh() below brings back fresh
+                    // section content in the `proposal` prop, but that
+                    // doesn't touch state that already initialized from an
+                    // earlier render. Merge the response directly into
+                    // `drafts`, same as regenerate/restore already do,
+                    // instead of leaving the textareas showing their
+                    // pre-generation (empty) value until a reload remounts
+                    // the component.
+                    const data = await call(`/api/proposals/${proposal.id}/generate`, { method: "POST" });
+                    if (data.sections) {
+                      setDrafts((d) => ({ ...d, ...data.sections }));
+                    }
+                  },
+                  "Proposal generated."
+                )
+              }
               className="shrink-0 rounded-md bg-zinc-900 px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
             >
               {busy === "generate" ? "Generating…" : "Generate proposal"}
@@ -467,38 +555,49 @@ export function ProposalEditor({
             <ul className="mb-3 text-sm text-zinc-600">
               {proposal.attachments.map((a) => (
                 <li key={a.id}>
-                  {a.filename} {a.extractedText ? "" : <span className="text-zinc-400">(no text extracted yet)</span>}
+                  {a.filename}{" "}
+                  {a.extractedText ? "" : <span className="text-zinc-400">(no text extracted — unsupported file type)</span>}
                 </li>
               ))}
               {proposal.attachments.length === 0 && <li className="text-zinc-400">None uploaded.</li>}
             </ul>
             {canEdit && (
-              <div className="flex items-center gap-2">
-                <input ref={fileInputRef} type="file" multiple className="text-sm text-zinc-600" />
-                <button
-                  disabled={busy !== null}
-                  onClick={() =>
-                    run(
-                      "upload",
-                      async () => {
-                        const files = fileInputRef.current?.files;
-                        if (!files || files.length === 0) return;
-                        const form = new FormData();
-                        Array.from(files).forEach((f) => form.append("files", f));
-                        const res = await fetch(`/api/proposals/${proposal.id}/attachments`, {
-                          method: "POST",
-                          body: form,
-                        });
-                        if (!res.ok) throw new Error((await res.json()).error || "Upload failed");
-                        if (fileInputRef.current) fileInputRef.current.value = "";
-                      },
-                      "File(s) uploaded."
-                    )
-                  }
-                  className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-40"
-                >
-                  {busy === "upload" ? "Uploading…" : "Upload"}
-                </button>
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    onChange={(e) => setHasFileSelected(!!e.target.files && e.target.files.length > 0)}
+                    className="text-sm text-zinc-600"
+                  />
+                  <button
+                    disabled={busy !== null || !hasFileSelected}
+                    onClick={() =>
+                      run(
+                        "upload",
+                        async () => {
+                          const files = fileInputRef.current?.files;
+                          if (!files || files.length === 0) throw new Error("Choose a file first.");
+                          const form = new FormData();
+                          Array.from(files).forEach((f) => form.append("files", f));
+                          const res = await fetch(`/api/proposals/${proposal.id}/attachments`, {
+                            method: "POST",
+                            body: form,
+                          });
+                          if (!res.ok) throw new Error((await res.json()).error || "Upload failed");
+                          if (fileInputRef.current) fileInputRef.current.value = "";
+                          setHasFileSelected(false);
+                        },
+                        "File(s) uploaded."
+                      )
+                    }
+                    className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-40"
+                  >
+                    {busy === "upload" ? "Uploading…" : "Upload"}
+                  </button>
+                </div>
+                <p className="text-xs text-zinc-400">Extracted for AI context: {SUPPORTED_EXTRACTION_LABEL}.</p>
               </div>
             )}
           </div>
@@ -567,25 +666,32 @@ export function ProposalEditor({
             {canSend && (
               <button
                 disabled={busy !== null}
-                onClick={() =>
-                  run(
-                    "send",
-                    () => call(`/api/proposals/${proposal.id}/send`, { method: "POST" }),
-                    "Sent to client."
-                  )
-                }
+                onClick={() => setShowSendConfirm(true)}
                 className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
               >
-                {busy === "send"
-                  ? "Sending…"
-                  : proposal.status === "send_failed" || proposal.status === "document_failed"
-                    ? "Retry send to client"
-                    : "Send to client"}
+                {proposal.status === "send_failed" || proposal.status === "document_failed"
+                  ? "Retry send to client"
+                  : "Send to client"}
+              </button>
+            )}
+            {canUndoApproval && (
+              <button
+                disabled={busy !== null}
+                onClick={() =>
+                  run(
+                    "undo-approval",
+                    () => call(`/api/proposals/${proposal.id}/undo-approval`, { method: "POST" }),
+                    "Approval undone — back to pending review."
+                  )
+                }
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-50"
+              >
+                {busy === "undo-approval" ? "Undoing…" : "Undo approval"}
               </button>
             )}
             {canSubmit && (
               <button
-                disabled={busy !== null}
+                disabled={busy !== null || !sectionsComplete}
                 onClick={() =>
                   run(
                     "submit",
@@ -594,6 +700,7 @@ export function ProposalEditor({
                   )
                 }
                 className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
+                title={!sectionsComplete ? "All sections must be filled in (and not flagged needs input) first" : undefined}
               >
                 {busy === "submit" ? "Submitting…" : "Submit for approval"}
               </button>
@@ -695,6 +802,70 @@ export function ProposalEditor({
           </div>
         </div>
       </div>
+
+      {showSendConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 px-4"
+          onClick={() => busy === null && setShowSendConfirm(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="send-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-lg border border-zinc-200 bg-white p-6 shadow-xl"
+          >
+            <h2 id="send-confirm-title" className="text-base font-semibold text-zinc-900">
+              Send this proposal to the client?
+            </h2>
+            <p className="mt-1.5 text-sm text-zinc-500">
+              This emails the proposal document directly — double-check who it&rsquo;s going to.
+            </p>
+
+            <dl className="mt-4 flex flex-col gap-2.5 rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="shrink-0 text-zinc-500">Recipient</dt>
+                <dd className="truncate text-right font-medium text-zinc-900">{proposal.clientEmail}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="shrink-0 text-zinc-500">Client</dt>
+                <dd className="truncate text-right font-medium text-zinc-900">{proposal.clientName}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="shrink-0 text-zinc-500">Company</dt>
+                <dd className="truncate text-right font-medium text-zinc-900">{proposal.companyName}</dd>
+              </div>
+              {sendCcEmails.length > 0 && (
+                <div className="flex justify-between gap-3">
+                  <dt className="shrink-0 text-zinc-500">Cc</dt>
+                  <dd className="text-right font-medium text-zinc-900">
+                    {sendCcEmails.join(", ")}
+                  </dd>
+                </div>
+              )}
+            </dl>
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={() => setShowSendConfirm(false)}
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={confirmSend}
+                className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
+              >
+                {busy === "send" ? "Sending…" : "Yes, send it"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

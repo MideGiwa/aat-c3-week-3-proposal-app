@@ -2,36 +2,70 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { AUTH_COOKIE_NAME } from "@/lib/auth";
+import { AUTH_COOKIE_NAME, SESSION_MAX_AGE_SECONDS } from "@/lib/auth";
+import { verifyTotpCode } from "@/lib/totp";
 
 export const dynamic = "force-dynamic";
 
-// POST /api/auth/login — placeholder sign-in described in src/lib/auth.ts:
-// pick a seeded user, no password. Replace before this is anything but an
-// internal course project.
-export async function POST(request: Request) {
-  const body = await request.json().catch(() => null);
-  if (!body?.userId) {
-    return NextResponse.json({ error: "userId is required" }, { status: 400 });
-  }
-
-  const [user] = await db.select().from(users).where(eq(users.id, body.userId)).limit(1);
-  if (!user) {
-    return NextResponse.json({ error: "Unknown user" }, { status: 404 });
-  }
-
-  const res = NextResponse.json({ user });
-  res.cookies.set(AUTH_COOKIE_NAME, user.id, {
+function setSessionCookie(res: NextResponse, userId: string) {
+  res.cookies.set(AUTH_COOKIE_NAME, userId, {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: SESSION_MAX_AGE_SECONDS,
   });
+}
+
+// POST /api/auth/login — real sign-in is email + a 6-digit code from an
+// authenticator app (src/lib/totp.ts), checked against the secret set up
+// once at /setup-authenticator. A separate `userId`-only path exists purely
+// for local development (see src/lib/auth.ts) and is refused outright
+// outside `next dev` — gated on a literal `process.env.NODE_ENV ===
+// "development"` check, the same pattern already used in storage.ts, so
+// there's no risk of it slipping into a production build's behavior.
+export async function POST(request: Request) {
+  const body = await request.json().catch(() => null);
+
+  if (body?.userId) {
+    if (process.env.NODE_ENV !== "development") {
+      return NextResponse.json({ error: "Not available" }, { status: 403 });
+    }
+    const [user] = await db.select().from(users).where(eq(users.id, body.userId)).limit(1);
+    if (!user) return NextResponse.json({ error: "Unknown user" }, { status: 404 });
+    const res = NextResponse.json({ user });
+    setSessionCookie(res, user.id);
+    return res;
+  }
+
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const code = typeof body?.code === "string" ? body.code.trim() : "";
+  if (!email || !code) {
+    return NextResponse.json({ error: "Email and code are required" }, { status: 400 });
+  }
+
+  const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+
+  // Same generic error whether the email doesn't exist, the account hasn't
+  // finished authenticator setup, or the code is wrong — distinguishing
+  // those for the caller would let someone probe which emails have
+  // accounts here.
+  const invalid = () => NextResponse.json({ error: "Invalid email or code" }, { status: 401 });
+
+  if (!user || user.status !== "active" || !user.totpSecret) return invalid();
+  if (!verifyTotpCode(user.totpSecret, code)) return invalid();
+
+  const res = NextResponse.json({ user });
+  setSessionCookie(res, user.id);
   return res;
 }
 
-// GET /api/auth/login — list sign-in-able users for the login page.
+// GET /api/auth/login — the login page uses this to decide whether to show
+// the local-dev quick-switch list at all. Outside development it always
+// comes back empty, so there's nothing for a production build to expose.
 export async function GET() {
-  const rows = await db.select().from(users);
-  return NextResponse.json({ users: rows });
+  if (process.env.NODE_ENV !== "development") {
+    return NextResponse.json({ devLoginEnabled: false, users: [] });
+  }
+  const rows = await db.select().from(users).where(eq(users.status, "active"));
+  return NextResponse.json({ devLoginEnabled: true, users: rows });
 }

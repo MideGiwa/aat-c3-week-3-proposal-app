@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { proposals, intakeFields } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { INTAKE_FIELDS, missingRequiredFields, isEditableStatus } from "@/lib/proposal-fields";
+import { trackOwnershipPickup } from "@/lib/ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,12 @@ export async function PATCH(
       .set({ fieldValue: value })
       .where(and(eq(intakeFields.proposalId, id), eq(intakeFields.fieldKey, key)));
   }
+
+  await trackOwnershipPickup({
+    proposal,
+    actingUser: user,
+    actionLabel: "edited the intake details",
+  });
 
   return NextResponse.json({ ok: true, fields: merged });
 }

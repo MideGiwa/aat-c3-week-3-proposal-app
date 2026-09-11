@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { proposals, sections, sectionVersions, events } from "@/lib/db/schema";
 import { contentNeedsInput, isEditableStatus } from "@/lib/proposal-fields";
 import { getCurrentUser } from "@/lib/auth";
+import { trackOwnershipPickup } from "@/lib/ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,12 @@ export async function PATCH(
     proposalId: id,
     eventType: "section_edited",
     detail: `${section.sectionKey} edited by ${user.name}`,
+  });
+
+  await trackOwnershipPickup({
+    proposal,
+    actingUser: user,
+    actionLabel: `edited ${section.sectionKey}`,
   });
 
   return NextResponse.json({ ok: true });

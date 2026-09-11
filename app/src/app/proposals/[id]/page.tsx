@@ -21,6 +21,7 @@ export default async function ProposalDetailPage({
     where: eq(proposals.id, id),
     with: {
       salesperson: true,
+      currentOwner: true,
       intakeFields: true,
       sections: {
         with: { versions: { orderBy: [asc(sectionVersions.createdAt)] } },

@@ -5,6 +5,8 @@ import { proposals, sections, sectionVersions, events, attachments } from "@/lib
 import { contentNeedsInput } from "@/lib/proposal-fields";
 import { generateProposalSections, GenerationError } from "@/lib/anthropic";
 import { getCurrentUser } from "@/lib/auth";
+import { notifyDiscord } from "@/lib/discord";
+import { trackOwnershipPickup } from "@/lib/ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +57,17 @@ export async function POST(
       .from(sections)
       .where(eq(sections.proposalId, id));
 
+    // Handed back to the client below so it can drop the new content
+    // straight into local editor state — the same pattern regenerate/restore
+    // already use, and necessary here for the same reason: this route's
+    // caller (ProposalEditor) seeds its `drafts` state from the `proposal`
+    // prop only once, on mount, so a router.refresh() alone updates the
+    // prop but never touches that already-initialized state. Without the
+    // generated content coming back in this response, the section
+    // textareas stay showing their pre-generation (empty) value until a
+    // full page reload remounts the component.
+    const generatedBySectionId: Record<string, string> = {};
+
     for (const section of existingSections) {
       const content = generated[section.sectionKey];
       if (content === undefined) continue;
@@ -73,6 +86,8 @@ export async function POST(
           updatedAt: new Date(),
         })
         .where(eq(sections.id, section.id));
+
+      generatedBySectionId[section.id] = content;
     }
 
     await db.insert(events).values({
@@ -85,7 +100,13 @@ export async function POST(
       .set({ status: "draft", lastError: null, updatedAt: new Date() })
       .where(eq(proposals.id, id));
 
-    return NextResponse.json({ ok: true });
+    await trackOwnershipPickup({
+      proposal,
+      actingUser: user,
+      actionLabel: "generated the proposal",
+    });
+
+    return NextResponse.json({ ok: true, sections: generatedBySectionId });
   } catch (err) {
     const reason =
       err instanceof GenerationError ? `${err.kind}: ${err.message}` : String(err);
@@ -99,6 +120,14 @@ export async function POST(
       .update(proposals)
       .set({ status: "generation_failed", lastError: reason, updatedAt: new Date() })
       .where(eq(proposals.id, id));
+
+    await notifyDiscord({
+      kind: "generation_failed",
+      proposalId: id,
+      clientName: proposal.clientName,
+      companyName: proposal.companyName,
+      detail: reason,
+    });
 
     return NextResponse.json({ error: "Generation failed", detail: reason }, { status: 502 });
   }

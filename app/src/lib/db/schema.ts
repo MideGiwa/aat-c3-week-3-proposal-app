@@ -25,6 +25,12 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
 const ROLE_VALUES = ["salesperson", "approver"] as const;
 
+// "invited": provisioned by an approver, no authenticator enrolled yet —
+// can't sign in. "active": has completed authenticator setup. Every
+// pre-existing seeded user is "active" by default (see the column default
+// below), so this migration doesn't lock anyone out.
+const USER_STATUS_VALUES = ["invited", "active"] as const;
+
 const PROPOSAL_STATUS_VALUES = [
   "draft",
   "pending_review",
@@ -65,6 +71,8 @@ const EVENT_TYPE_VALUES = [
   "document_failed",
   "sent",
   "send_failed",
+  "approval_undone",
+  "ownership_changed",
 ] as const;
 
 // --- Tables ------------------------------------------------------------------
@@ -89,6 +97,22 @@ export const users = sqliteTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   role: text("role", { enum: ROLE_VALUES }).notNull().default("salesperson"),
+  status: text("status", { enum: USER_STATUS_VALUES }).notNull().default("active"),
+  // Set once, at authenticator setup, and never exposed again after that —
+  // real sign-in verifies a submitted code against this rather than trusting
+  // anything the client sends about identity.
+  totpSecret: text("totp_secret"),
+  // Not a declared foreign key (a self-reference on this same table would
+  // need an awkward lazy-type workaround for one purely informational
+  // column) — just the inviting user's id, shown on the team page.
+  invitedBy: text("invited_by"),
+  // Only a hash of the invite token is stored (sha256 hex) — the raw token
+  // lives only in the emailed link and this request's memory, so a DB leak
+  // alone can't be used to complete someone else's pending setup. Cleared
+  // once the invite is used (status flips to "active") so a used/expired
+  // link can't be replayed.
+  inviteTokenHash: text("invite_token_hash"),
+  inviteTokenExpiresAt: integer("invite_token_expires_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -102,7 +126,24 @@ export const proposals = sqliteTable("proposals", {
   clientEmail: text("client_email").notNull(),
   companyName: text("company_name").notNull(),
   dateOfCall: text("date_of_call"),
+  // The original creator — permanent, never changes. Kept distinct from
+  // `currentOwnerId` below so "who originally brought this in" is never
+  // lost even after the proposal has changed hands several times.
   salespersonId: text("salesperson_id")
+    .notNull()
+    .references(() => users.id),
+  // Who is actively responsible for this proposal right now, for the
+  // purposes of the "Mine" default view on /proposals. Starts equal to
+  // salespersonId at creation. Any salesperson can already edit any
+  // proposal (no route enforces salespersonId === current user) — this
+  // column doesn't add an access restriction, it just tracks who's
+  // currently the one working it, updated automatically (never via a
+  // manual "reassign" action) the moment a *different* salesperson takes a
+  // real action on the proposal (editing/regenerating a section, uploading
+  // an attachment, generating, or submitting). Every change is logged as
+  // an `ownership_changed` event — see src/lib/ownership.ts — so a
+  // hand-off is always auditable, not just a silent column update.
+  currentOwnerId: text("current_owner_id")
     .notNull()
     .references(() => users.id),
   status: text("status", { enum: PROPOSAL_STATUS_VALUES }).notNull().default("draft"),
@@ -195,6 +236,14 @@ export const approvals = sqliteTable("approvals", {
   decidedAt: integer("decided_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
+  // Set when an approver undoes an "approved" decision before the proposal
+  // is sent (architecture.md 3.5 addendum). The row is kept rather than
+  // deleted — same append-only-history reasoning as section_versions/events
+  // — so the fact that a proposal was briefly approved isn't erased from the
+  // audit trail; every "latest approval" lookup (the send route's cc list,
+  // the editor's cc preview) filters these out via `undoneAt IS NULL`.
+  undoneAt: integer("undone_at", { mode: "timestamp" }),
+  undoneBy: text("undone_by").references(() => users.id),
 });
 
 // Append-only audit/event log. Every component writes here on success and
@@ -237,7 +286,10 @@ export const documents = sqliteTable("documents", {
 // --- Relations (for the drizzle query API, e.g. db.query.proposals.findMany) -
 
 export const usersRelations = relations(users, ({ many }) => ({
-  proposals: many(proposals),
+  // Two distinct relations to `proposals` (created vs. currently owned) —
+  // relationName on both sides disambiguates which FK each refers to.
+  proposalsCreated: many(proposals, { relationName: "proposalCreator" }),
+  proposalsOwned: many(proposals, { relationName: "proposalCurrentOwner" }),
   approvals: many(approvals),
 }));
 
@@ -245,6 +297,12 @@ export const proposalsRelations = relations(proposals, ({ one, many }) => ({
   salesperson: one(users, {
     fields: [proposals.salespersonId],
     references: [users.id],
+    relationName: "proposalCreator",
+  }),
+  currentOwner: one(users, {
+    fields: [proposals.currentOwnerId],
+    references: [users.id],
+    relationName: "proposalCurrentOwner",
   }),
   intakeFields: many(intakeFields),
   sections: many(sections),
