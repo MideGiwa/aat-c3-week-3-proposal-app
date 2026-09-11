@@ -27,6 +27,7 @@ export type DiscordNotificationKind =
   | "approved"
   | "rejected"
   | "changes_requested"
+  | "approval_undone"
   | "sent";
 
 const TITLE_BY_KIND: Record<DiscordNotificationKind, string> = {
@@ -37,6 +38,14 @@ const TITLE_BY_KIND: Record<DiscordNotificationKind, string> = {
   approved: "✅ Proposal approved",
   rejected: "❌ Proposal rejected",
   changes_requested: "🔁 Changes requested",
+  // Grouped with the other approval-decision notifications (that's the
+  // category the user picked when asked which events should notify) even
+  // though it's not itself a new decision — an approver reversing an
+  // earlier approval is exactly the kind of "needs someone's attention
+  // again" moment that category exists for, and it was a real gap: this
+  // silently flipped a proposal back to pending_review with no notification
+  // at all before this was added.
+  approval_undone: "↩️ Approval undone",
   sent: "📤 Sent to client",
 };
 
@@ -52,6 +61,7 @@ const COLOR_BY_KIND: Record<DiscordNotificationKind, number> = {
   approved: 0x15803d,
   rejected: 0xdc2626,
   changes_requested: 0xea580c,
+  approval_undone: 0xd97706,
   sent: 0x15803d,
 };
 

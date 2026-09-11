@@ -3,6 +3,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { approvals, proposals, events } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { notifyDiscord } from "@/lib/discord";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,14 @@ export async function POST(
     proposalId: id,
     eventType: "approval_undone",
     detail: `Undone by ${user.name} — back to pending review`,
+  });
+
+  await notifyDiscord({
+    kind: "approval_undone",
+    proposalId: id,
+    clientName: proposal.clientName,
+    companyName: proposal.companyName,
+    actorName: user.name,
   });
 
   return NextResponse.json({ ok: true });
