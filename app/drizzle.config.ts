@@ -1,12 +1,14 @@
 import "dotenv/config";
 import { defineConfig } from "drizzle-kit";
-import { isPostgresUrl } from "./src/lib/db/dialect";
+import { isPostgresUrl, normalizeDatabaseUrl } from "./src/lib/db/dialect";
 
 // Mirrors the runtime dispatch in src/lib/db/index.ts and schema.ts: which
 // dialect drizzle-kit targets (for `db:push`/`db:generate`/`db:studio`)
 // follows DATABASE_URL the same way the app itself does, so there's one
 // switch to get right, not three. See DATABASE.md at the repo root.
-const databaseUrl = process.env.DATABASE_URL ?? "file:./local-dev.sqlite";
+// normalizeDatabaseUrl strips whitespace/wrapping quotes that would
+// otherwise make a real postgres:// URL fail this check silently.
+const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL) || "file:./local-dev.sqlite";
 const postgres = isPostgresUrl(databaseUrl);
 
 export default defineConfig(

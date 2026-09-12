@@ -32,6 +32,14 @@ export async function POST(request: Request) {
     }
     const [user] = await db.select().from(users).where(eq(users.id, body.userId)).limit(1);
     if (!user) return NextResponse.json({ error: "Unknown user" }, { status: 404 });
+    // Same status gate the real login path enforces (and getCurrentUser
+    // re-checks on every request regardless) — this dev-only shortcut
+    // exists to skip typing an authenticator code, not to skip whether the
+    // account can sign in at all. Without this, a removed or not-yet-set-up
+    // account could still get a session cookie through here.
+    if (user.status !== "active") {
+      return NextResponse.json({ error: `This account is ${user.status}, not active` }, { status: 403 });
+    }
     const res = NextResponse.json({ user });
     setSessionCookie(res, user.id);
     return res;

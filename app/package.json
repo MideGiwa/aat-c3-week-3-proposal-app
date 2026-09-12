@@ -10,7 +10,9 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:push:force": "drizzle-kit push --force",
+    "db:push:neon": "tsx scripts/push-schema-to-neon.ts",
     "db:studio": "drizzle-kit studio",
+    "db:migrate:neon": "tsx scripts/migrate-sqlite-to-postgres.ts",
     "seed": "tsx src/lib/db/seed.ts"
   },
   "dependencies": {

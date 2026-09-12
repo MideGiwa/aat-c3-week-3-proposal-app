@@ -44,7 +44,9 @@ export async function POST(request: Request) {
     const reason =
       existing.status === "active"
         ? "A user with this email already exists"
-        : "An invite for this email is already pending — use Resend invite instead of creating a new one";
+        : existing.status === "removed"
+          ? "This email belongs to a removed team member — use Reactivate on the team list instead of creating a new one"
+          : "An invite for this email is already pending — use Resend invite instead of creating a new one";
     return NextResponse.json({ error: reason }, { status: 409 });
   }
 

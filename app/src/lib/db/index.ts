@@ -13,7 +13,7 @@ import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as sqliteSchema from "./schema.sqlite";
 import * as postgresSchema from "./schema.postgres";
-import { isPostgresUrl } from "./dialect";
+import { isPostgresUrl, isRecognizedSqliteUrl, normalizeDatabaseUrl } from "./dialect";
 
 // Deliberately does not throw when unset: this module is imported by every
 // route (via auth -> db), including ones collected at build time before any
@@ -24,12 +24,35 @@ if (!process.env.DATABASE_URL) {
     "[db] DATABASE_URL is not set. Copy .env.example to .env.local and point it at your database — queries will fail until then."
   );
 }
-const databaseUrl = process.env.DATABASE_URL || "file:./local-dev.sqlite";
+// normalizeDatabaseUrl trims whitespace and strips an accidental wrapping
+// quote pair (see dialect.ts) — both real mistakes when pasting a
+// connection string into a dashboard's env var field, and both would
+// otherwise make a perfectly good postgres:// URL fail the scheme check
+// below and silently fall through to the SQLite branch instead.
+const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL) || "file:./local-dev.sqlite";
 
 function createDbAndClient() {
   if (isPostgresUrl(databaseUrl)) {
     const pool = new Pool({ connectionString: databaseUrl });
     return { client: pool as unknown, db: drizzlePg(pool, { schema: postgresSchema }) };
+  }
+  if (!isRecognizedSqliteUrl(databaseUrl)) {
+    // Reaching here with something that's neither a postgres:// URL nor a
+    // recognized libsql scheme (file:/libsql:/http(s):) means DATABASE_URL
+    // is set to *something*, just not anything this app knows how to open —
+    // almost always a misconfigured env var (wrong Vercel environment
+    // scope, a stray quote or newline that survived normalization, a typo'd
+    // scheme) rather than a real attempt to use SQLite. Failing here with
+    // the actual scheme (never the full URL, which may carry credentials)
+    // is far more diagnosable than the opaque `LibsqlError: URL_INVALID`
+    // this used to surface as instead.
+    const shown = databaseUrl.slice(0, 12) || "(empty)";
+    throw new Error(
+      `[db] DATABASE_URL doesn't look like a Postgres or SQLite/libsql URL (starts with "${shown}..."). ` +
+        `A Neon/Postgres connection string must start with postgres:// or postgresql://. ` +
+        `A local SQLite path should look like file:./local-dev.sqlite. ` +
+        `Check for a stray quote, extra whitespace, or the wrong Vercel environment scope.`
+    );
   }
   const client = createClient({ url: databaseUrl });
   return { client: client as unknown, db: drizzleLibsql(client, { schema: sqliteSchema }) };

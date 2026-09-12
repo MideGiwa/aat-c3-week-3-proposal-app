@@ -28,10 +28,15 @@ import {
 export const roleEnum = pgEnum("role", ["salesperson", "approver"]);
 
 // "invited": provisioned by an approver, no authenticator enrolled yet —
-// can't sign in. "active": has completed authenticator setup. Every
-// pre-existing seeded user is "active" by default, so this migration
-// doesn't lock anyone out.
-export const userStatusEnum = pgEnum("user_status", ["invited", "active"]);
+// can't sign in. "active": has completed authenticator setup. "removed":
+// an approver revoked this person's access — getCurrentUser()/login already
+// reject anything but "active", so this alone is what locks them out. The
+// row (and their totpSecret) is kept rather than deleted, both so
+// proposals/approvals/events they're attached to keep a real name instead
+// of a dangling reference, and so "Reactivate" can restore access instantly
+// without re-provisioning. Every pre-existing seeded user is "active" by
+// default, so this migration doesn't lock anyone out.
+export const userStatusEnum = pgEnum("user_status", ["invited", "active", "removed"]);
 
 export const proposalStatusEnum = pgEnum("proposal_status", [
   "draft",
@@ -104,6 +109,19 @@ export const users = pgTable("users", {
   inviteTokenHash: text("invite_token_hash"),
   inviteTokenExpiresAt: timestamp("invite_token_expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  // Set together when an approver removes this person (status -> "removed"),
+  // cleared together on Reactivate — same undoneAt/undoneBy pattern as
+  // approvals, so "who removed this person and when" is a real fact, not
+  // just inferred from the status flipping.
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+  removedBy: uuid("removed_by"),
+  // Same pattern again: who last changed this person's role, and when —
+  // null until the first change. Who can approve proposals is exactly the
+  // kind of thing this app already treats as needing a real audit trail
+  // (see approval_undone/ownership_changed), so a role flip shouldn't be
+  // silent either.
+  roleChangedAt: timestamp("role_changed_at", { withTimezone: true }),
+  roleChangedBy: uuid("role_changed_by"),
 });
 
 export const proposals = pgTable("proposals", {

@@ -6,6 +6,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { isInviteTokenExpired } from "@/lib/invite-tokens";
 import { InviteTeamForm } from "./InviteTeamForm";
 import { ResendInviteButton } from "./ResendInviteButton";
+import { RemoveTeamMemberButton } from "./RemoveTeamMemberButton";
+import { ReactivateTeamMemberButton } from "./ReactivateTeamMemberButton";
+import { ChangeRoleButton } from "./ChangeRoleButton";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +57,16 @@ export default async function TeamPage() {
                   <StatusPill row={row} />
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {row.status === "invited" && <ResendInviteButton userId={row.id} />}
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {row.status === "invited" && <ResendInviteButton userId={row.id} />}
+                    {(row.status === "invited" || row.status === "active") && (
+                      <ChangeRoleButton userId={row.id} currentRole={row.role} />
+                    )}
+                    {row.status !== "removed" && row.id !== user.id && (
+                      <RemoveTeamMemberButton userId={row.id} name={row.name} />
+                    )}
+                    {row.status === "removed" && <ReactivateTeamMemberButton userId={row.id} />}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -71,6 +83,15 @@ function StatusPill({ row }: { row: typeof users.$inferSelect }) {
       <span className="inline-flex items-center gap-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
         <span className="text-zinc-700">Active</span>
+      </span>
+    );
+  }
+
+  if (row.status === "removed") {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+        <span className="text-zinc-500">Removed</span>
       </span>
     );
   }
